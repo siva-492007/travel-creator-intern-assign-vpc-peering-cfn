@@ -1,0 +1,312 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: |
+  Create EC2 inside 2 VPCs and create VPC peering connection
+  
+Resources:
+
+# ----------------------------------------------------------------------------------------------------------------------------------------------------------------
+# ====================================================== VPC-1 Creation and EC2 Launch============================================================================
+# ----------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+# create vpc1
+  vpc1:
+    Type: AWS::EC2::VPC
+    Properties: 
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: MyVpc1
+
+# Subnet
+  vpc1Subnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.0.0.0/24
+      VpcId: !Ref vpc1 # Required
+      MapPublicIpOnLaunch: true # give public address to instances
+      Tags:
+        - Key: Name
+          Value: MyVpc1-Subnet
+
+# Internet Gateway
+  vpc1Igw:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: MyVpc1Igw
+
+# IGW attach to vpc
+  vpc1IgwAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties: 
+      InternetGatewayId: !Ref vpc1Igw
+      VpcId: !Ref vpc1
+
+# Route Tables:
+  vpc1RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref vpc1 # Required
+      Tags:
+        - Key: Name
+          Value: MyVpc1RouteTable
+
+# Public Route for route table - tags not allows
+  vpc1PublicRoutes:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref vpc1RouteTable # Required
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref vpc1Igw
+
+# Attaching route table to subnet
+  vpc1SubnetRouteTable:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: 
+      RouteTableId: !Ref vpc1RouteTable
+      SubnetId: !Ref vpc1Subnet
+
+# Security Group
+  vpc1SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow icmp, 80, 22, 443 # Required
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: icmp
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: MyVpc1SecurityGroup
+      VpcId: !Ref vpc1
+
+# New key pair
+  keypair1new:
+    Type: 'AWS::EC2::KeyPair'
+    Properties:
+      KeyName: MyKeyPair1
+
+# EC2 in vpc1
+  instance1:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-0d50e5e845c552faf
+      InstanceType: t2.micro
+      KeyName: !Ref keypair1new
+      NetworkInterfaces: 
+      - AssociatePublicIpAddress: "true"
+        DeviceIndex: "0"
+        GroupSet: 
+          - Ref: vpc1SecurityGroup
+        SubnetId: !Ref vpc1Subnet
+      # install apache2 server using user data
+      UserData: 
+        Fn::Base64: 
+          !Sub |
+            #!/bin/bash 
+            sudo apt-get update
+            sudo apt install apache2 -y 
+            echo "<h1>Hello from EC2 in VPC-1</h1> <h2>Public IP - $(curl http://169.254.169.254/latest/meta-data/public-ipv4)</h2> <h2>Private IP - $(curl http://169.254.169.254/latest/meta-data/local-ipv4)</h2>" > index.html
+            sudo cp index.html /var/www/html/index.html
+      Tags:
+        - Key: Name
+          Value: MyVpc1Instance1
+
+# ----------------------------------------------------------------------------------------------------------------------------------------------------------------
+# ====================================================== VPC-2 Creation and EC2 Launch ============================================================================
+# ----------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+# create vpc2
+  vpc2:
+    Type: AWS::EC2::VPC
+    Properties: 
+      CidrBlock: 192.168.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      InstanceTenancy: default
+      Tags: 
+        - Key: Name
+          Value: MyVpc2
+
+# Subnet
+  vpc2Subnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 192.168.0.0/24
+      VpcId: !Ref vpc2 # Required
+      MapPublicIpOnLaunch: true # give public address to instances
+      Tags:
+        - Key: Name
+          Value: MyVpc2-Subnet
+
+# Internet Gateway
+  vpc2Igw:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: MyVpc2Igw
+
+# IGW attach to vpc
+  vpc2IgwAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties: 
+      InternetGatewayId: !Ref vpc2Igw
+      VpcId: !Ref vpc2
+
+# Route Tables:
+  vpc2RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref vpc2 # Required
+      Tags:
+        - Key: Name
+          Value: MyVpc2RouteTable
+
+# Public Route for route table - no tags allowed
+  vpc2PublicRoutes:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref vpc2RouteTable # Required
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref vpc2Igw
+
+# Attaching route table to subnet
+  vpc2SubnetRouteTable:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: 
+      RouteTableId: !Ref vpc2RouteTable
+      SubnetId: !Ref vpc2Subnet
+
+# Security Group
+  vpc2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow icmp, 80, 22, 443 # Required
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: icmp
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: MyVpc2SecurityGroup
+      VpcId: !Ref vpc2
+
+# New key pair
+  keypair2new:
+    Type: 'AWS::EC2::KeyPair'
+    Properties:
+      KeyName: MyKeyPair2
+
+# EC2 in vpc2
+  instance2:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-0d50e5e845c552faf
+      InstanceType: t2.micro
+      KeyName: !Ref keypair2new
+      NetworkInterfaces: 
+      - AssociatePublicIpAddress: "true"
+        DeviceIndex: "0"
+        GroupSet: 
+          - Ref: vpc2SecurityGroup
+        SubnetId: !Ref vpc2Subnet
+      # install apache2 server using user data
+      UserData: 
+        Fn::Base64: 
+          !Sub |
+            #!/bin/bash 
+            sudo apt-get update
+            sudo apt install apache2 -y 
+            echo "<h1>Hello from EC2 in VPC-2</h1> <h2>Public IP - $(curl http://169.254.169.254/latest/meta-data/public-ipv4)</h2> <h2>Private IP - $(curl http://169.254.169.254/latest/meta-data/local-ipv4)</h2>" > index.html
+            sudo cp index.html /var/www/html/index.html
+      Tags:
+        - Key: Name
+          Value: MyVpc2Instance2
+
+
+# ----------------------------------------------------------------------------------------------------------------------------------------------------------------
+# ================================================== VPC Peering Connection and Route Updation ===================================================================
+# ----------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+# VPC1 and VPC2 Peering Connection
+  vpc1Vpc2PeeringConnection:
+    Type: AWS::EC2::VPCPeeringConnection
+    Properties:
+      VpcId: !Ref vpc1
+      PeerVpcId: !Ref vpc2
+      Tags:
+      - Key: Name
+        Value: vpc1-vpc2-peer
+
+# VPC1 route to VPC2 through peering connection
+  vpc1PeerRouteToVpc2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref vpc1RouteTable # Required
+      DestinationCidrBlock: 192.168.0.0/24
+      VpcPeeringConnectionId: !Ref vpc1Vpc2PeeringConnection
+
+
+# VPC2 route to VPC1 through peering connection
+  vpc2PeerRouteToVpc1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref vpc2RouteTable # Required
+      DestinationCidrBlock: 10.0.0.0/24
+      VpcPeeringConnectionId: !Ref vpc1Vpc2PeeringConnection
+
+
+Outputs:
+
+# Public IP of EC2 in VPC1
+  Instance1PublicIp:
+    Description: Public IP of EC2 in VPC1
+    Value: !GetAtt instance1.PublicIp
+
+# Private IP of EC2 in VPC1
+  Instance1PrivateIp:
+    Description: Private IP of EC2 in VPC1
+    Value: !GetAtt instance1.PrivateIp
+
+# Public IP of EC2 in VPC2
+  Instance2PublicIp:
+    Description: Public IP of EC2 in VPC2
+    Value: !GetAtt instance2.PublicIp
+
+# Private IP of EC2 in VPC2
+  Instance2PrivateIp:
+    Description: Private IP of EC2 in VPC2
+    Value: !GetAtt instance2.PrivateIp
+    
